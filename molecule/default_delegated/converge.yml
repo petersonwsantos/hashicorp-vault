@@ -1,0 +1,7 @@
+---
+- name: Converge
+  hosts: all
+  tasks:
+    - name: "Include petersonwsantos.hashicorp-vault"
+      include_role:
+        name: "petersonwsantos.hashicorp-vault"

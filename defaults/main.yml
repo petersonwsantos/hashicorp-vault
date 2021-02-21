@@ -1,0 +1,14 @@
+---
+# defaults file for petersonwsantos.hashicorp-vault
+
+hashicorp_vault_version: "0.11.1"
+hashicorp_vault_checksum: "sha256:eb8d2461d0ca249c1f91005f878795998bdeafccfde0b9bae82343541ce65996"
+hashicorp_vault_packages: ['unzip']
+hashicorp_vault_user: "vault"
+hashicorp_vault_group: "vault"
+hashicorp_vault_config_path: "/etc/vault.hcl"
+
+
+hashicorp_vault_backend_storage_file_path: "/opt/vault_data"
+hashicorp_vault_unseal_keys_path: "{{ playbook_dir }}/unsealKey"
+hashicorp_vault_root_token_path: "{{ playbook_dir }}/rootKey"

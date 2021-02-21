@@ -1,0 +1,132 @@
+---
+# tasks file for petersonwsantos.hashicorp-vault
+
+- name: Create vault group
+  group:
+    name: "{{ hashicorp_vault_group }}"
+  become: true
+
+- name: Create vault user
+  user:
+    name: "{{ hashicorp_vault_user }}"
+    group: "{{ hashicorp_vault_group }}"
+    system: yes
+    shell: "/sbin/nologin"
+    comment: "vault nologin User"
+    createhome: "no"
+    state: present
+
+- name: Install prerequisites
+  package:
+    name: "{{ item }}"
+    #update_cache: yes
+    state: present
+  with_items: "{{ hashicorp_vault_packages }}"
+  become: yes
+
+- name: Download Vault
+  get_url:
+    url: https://releases.hashicorp.com/vault/{{ hashicorp_vault_version }}/vault_{{ hashicorp_vault_version }}_linux_amd64.zip
+    dest: /tmp/vault_{{ hashicorp_vault_version }}_linux_amd64.zip
+    owner: "{{ hashicorp_vault_user }}"
+    group: "{{ hashicorp_vault_group }}"
+    mode: 0755
+    checksum: "{{ hashicorp_vault_checksum }}"
+  register: result_download
+
+- name: Unzip Vault
+  unarchive:
+    src: "{{ result_download.dest }}"
+    dest: /usr/local/bin
+    copy: no
+    owner: "{{ hashicorp_vault_user }}"
+    group: "{{ hashicorp_vault_group }}"
+    mode: 0755
+
+- name: Set Vault binary capabilities
+  capabilities:
+    path: /usr/local/bin/vault
+    capability: cap_ipc_lock+ep
+    state: present
+
+- name: Copy service file
+  template:
+    src: init.service.j2
+    dest: /etc/systemd/system/vault.service
+    owner: root
+    group: root
+  notify: systemd_reload
+
+- name: Config file
+  template:
+    src: vault.hcl.j2
+    dest: "{{ hashicorp_vault_config_path }}"
+    owner: "{{ hashicorp_vault_user }}"
+    group: "{{ hashicorp_vault_group }}"
+
+- name: Vault service
+  service:
+    name: vault
+    state: started
+    enabled: yes
+
+- name: Create unseal directories
+  file:
+    path: "{{ hashicorp_vault_unseal_keys_path }}"
+    state: directory
+  delegate_to: localhost
+
+# Filesystem Storage Backend
+# https://www.vaultproject.io/docs/configuration/storage/filesystem
+- name: Create Store Data
+  file:
+    path: "{{ hashicorp_vault_backend_storage_file_path }}"
+    state: directory
+    owner: "{{ hashicorp_vault_user }}"
+    group: "{{ hashicorp_vault_group }}"
+
+- name: Create root key directories
+  file:
+    path: "{{ hashicorp_vault_root_token_path }}"
+    state: directory
+  delegate_to: localhost
+
+# o vault é inicializado, mas permanece lacrado. root token(token raiz) e unseal keys(chaves de desbloqueio).
+- name: Initialise Vault operator
+  shell: vault operator init -key-shares=5 -key-threshold=3 -format json
+  environment:
+    VAULT_ADDR: "http://127.0.0.1:8200"
+  register: result_vault_init
+
+- name: Parse output of vault init
+  set_fact:
+    hashicorp_vault_init_parsed: "{{ result_vault_init.stdout | from_json }}"
+
+- name: Write unseal keys to files
+  copy:
+    dest: "{{ hashicorp_vault_unseal_keys_path }}/unseal_key_{{ item.0 }}"
+    content: "{{ item.1 }}"
+  with_indexed_items: "{{ hashicorp_vault_init_parsed.unseal_keys_hex }}"
+  delegate_to: localhost
+
+- name: Write root token to file
+  copy:
+    content: "{{ hashicorp_vault_init_parsed.root_token }}"
+    dest: "{{ hashicorp_vault_root_token_path }}/rootkey"
+  delegate_to: localhost
+
+- name: Reading unseal key contents
+  command: cat {{ item }}
+  register: unseal_keys
+  with_fileglob: "{{ hashicorp_vault_unseal_keys_path }}/*"
+  delegate_to: localhost
+  become: no
+
+# Precisamos destravá-lo com o número necessário de chaves de destravamento.
+# No caso padrão, existem 5 chaves unseal geradas e precisamos fornecer 3
+- name: Unseal vault with unseal keys
+  shell: |
+    vault operator unseal {{ item.stdout }}
+  environment:
+    VAULT_ADDR: "http://127.0.0.1:8200"
+  with_items: "{{ unseal_keys.results }}"

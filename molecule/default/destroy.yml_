@@ -1,0 +1,16 @@
+---
+- name: Destroy
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  no_log: "{{ molecule_no_log }}"
+  vars:
+    hashicorp_vault_unseal_keys_path: "{{ playbook_dir }}/unsealKey"
+    hashicorp_vault_root_token_path: "{{ playbook_dir }}/rootKey"
+  tasks:
+    - file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ hashicorp_vault_unseal_keys_path }}"
+        - "{{ hashicorp_vault_root_token_path }}"
